@@ -43,7 +43,7 @@ export default function App() {
 
   // Pulls live data from your FastAPI backend when running
   useEffect(() => {
-    fetch('http://127.0.0.1:8000/api/dashboard-summary')
+    fetch('https://financial-dashboard-i5z3.onrender.com')
       .then((res) => res.json())
       .then((data) => setDashboardData(data))
       .catch(() => console.log('Backend offline — displaying prototype data.'));
