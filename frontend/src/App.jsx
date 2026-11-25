@@ -47,7 +47,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [budgetTarget, setBudgetTarget] = useState(2500);
   const [targetInput, setTargetInput] = useState('2500');
-  const [balanceInput, setBalanceInput] = useState('8700');
+  const [balanceInput, setBalanceInput] = useState('7703.4');
   const [data, setData] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
 
@@ -65,15 +65,17 @@ export default function App() {
     amount: '',
   });
 
+  const syncData = (json) => {
+    setData(json);
+    if (json?.current_balance !== undefined) {
+      setBalanceInput(String(json.current_balance));
+    }
+  };
+
   useEffect(() => {
     fetch(`${API_URL}/api/dashboard-summary`)
       .then((res) => res.json())
-      .then((json) => {
-        setData(json);
-        if (json.starting_balance !== undefined) {
-          setBalanceInput(String(json.starting_balance));
-        }
-      })
+      .then((json) => syncData(json))
       .catch(() => console.log('Backend waking up or offline.'));
   }, []);
 
@@ -86,8 +88,7 @@ export default function App() {
       body: JSON.stringify({ balance: val }),
     });
     if (res.ok) {
-      const updated = await res.json();
-      setData(updated);
+      syncData(await res.json());
     }
   };
 
@@ -101,8 +102,7 @@ export default function App() {
       body: JSON.stringify({ ...txForm, amount: parseFloat(txForm.amount) }),
     });
     if (res.ok) {
-      const updated = await res.json();
-      setData(updated);
+      syncData(await res.json());
       setTxForm({ ...txForm, description: '', amount: '' });
     }
   };
@@ -112,8 +112,7 @@ export default function App() {
       method: 'DELETE',
     });
     if (res.ok) {
-      const updated = await res.json();
-      setData(updated);
+      syncData(await res.json());
     }
   };
 
@@ -127,8 +126,7 @@ export default function App() {
       body: JSON.stringify({ ...incomeForm, amount: parseFloat(incomeForm.amount) }),
     });
     if (res.ok) {
-      const updated = await res.json();
-      setData(updated);
+      syncData(await res.json());
       setIncomeForm({ name: '', type: 'Income', amount: '' });
     }
   };
@@ -138,8 +136,7 @@ export default function App() {
       method: 'DELETE',
     });
     if (res.ok) {
-      const updated = await res.json();
-      setData(updated);
+      syncData(await res.json());
     }
   };
 
@@ -157,8 +154,7 @@ export default function App() {
         body: formData,
       });
       if (res.ok) {
-        const updated = await res.json();
-        setData(updated);
+        syncData(await res.json());
         setUploadStatus('CSV loaded! Deposits, expenses & ML models updated.');
       } else {
         const err = await res.json();
@@ -178,7 +174,7 @@ export default function App() {
     datasets: [
       {
         label: 'Account Balance',
-        data: data?.balance_history?.values ?? [8700, 7300, 6200, 5603.4],
+        data: data?.balance_history?.values ?? [8700, 7300, 6200, 7703.4],
         borderColor: '#4f46e5',
         backgroundColor: 'rgba(79, 70, 229, 0.1)',
         fill: true,
@@ -188,7 +184,7 @@ export default function App() {
       },
       {
         label: 'Linear Regression Trend',
-        data: data?.balance_history?.trend ?? [8400, 7400, 6400, 5500],
+        data: data?.balance_history?.trend ?? [8400, 7900, 7600, 7500],
         borderColor: '#94a3b8',
         borderDash: [5, 5],
         pointRadius: 0,
@@ -346,7 +342,7 @@ export default function App() {
           {/* DASHBOARD TAB */}
           {activeTab === 'dashboard' && (
             <div className="max-w-7xl mx-auto space-y-6">
-              {/* Starting Balance Editor Bar */}
+              {/* Current Balance Editor Bar */}
               <div className="bg-white px-6 py-4 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-6 text-sm">
                   <div>
@@ -364,7 +360,7 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-500 font-medium">Starting Bank Balance:</span>
+                  <span className="text-sm text-slate-500 font-medium">Current Bank Balance:</span>
                   <div className="flex items-center border border-slate-200 rounded-lg px-2.5 py-1.5 bg-slate-50">
                     <span className="text-slate-400 mr-1">$</span>
                     <input

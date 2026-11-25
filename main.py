@@ -170,7 +170,11 @@ def get_dashboard_summary():
 @app.post("/api/balance")
 def update_balance(payload: BalanceUpdate):
     global starting_balance
-    starting_balance = float(payload.balance)
+    net_change = sum(
+        tx["amount"] if tx.get("type", "Expense") == "Deposit" else -tx["amount"]
+        for tx in transactions
+    )
+    starting_balance = float(payload.balance) - net_change
     return build_dashboard_state()
 
 
