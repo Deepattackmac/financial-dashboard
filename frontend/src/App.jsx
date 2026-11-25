@@ -25,6 +25,8 @@ import {
   Plus,
   AlertTriangle,
   CheckCircle2,
+  Trash2,
+  ArrowUpCircle,
 } from 'lucide-react';
 
 ChartJS.register(
@@ -45,14 +47,16 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [budgetTarget, setBudgetTarget] = useState(2500);
   const [targetInput, setTargetInput] = useState('2500');
+  const [balanceInput, setBalanceInput] = useState('8700');
   const [data, setData] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
 
   // Form states
   const [txForm, setTxForm] = useState({
-    date: '2026-10-28',
+    date: '2026-11-25',
     description: '',
     category: 'Food',
+    type: 'Expense',
     amount: '',
   });
   const [incomeForm, setIncomeForm] = useState({
@@ -64,9 +68,28 @@ export default function App() {
   useEffect(() => {
     fetch(`${API_URL}/api/dashboard-summary`)
       .then((res) => res.json())
-      .then((json) => setData(json))
+      .then((json) => {
+        setData(json);
+        if (json.starting_balance !== undefined) {
+          setBalanceInput(String(json.starting_balance));
+        }
+      })
       .catch(() => console.log('Backend waking up or offline.'));
   }, []);
+
+  const handleUpdateBalance = async () => {
+    const val = parseFloat(balanceInput);
+    if (isNaN(val)) return;
+    const res = await fetch(`${API_URL}/api/balance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ balance: val }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setData(updated);
+    }
+  };
 
   const handleAddTransaction = async (e) => {
     e.preventDefault();
@@ -81,6 +104,16 @@ export default function App() {
       const updated = await res.json();
       setData(updated);
       setTxForm({ ...txForm, description: '', amount: '' });
+    }
+  };
+
+  const handleDeleteTransaction = async (id) => {
+    const res = await fetch(`${API_URL}/api/transactions/${id}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setData(updated);
     }
   };
 
@@ -100,6 +133,16 @@ export default function App() {
     }
   };
 
+  const handleDeleteIncome = async (id) => {
+    const res = await fetch(`${API_URL}/api/income/${id}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setData(updated);
+    }
+  };
+
   const handleCsvUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -116,7 +159,7 @@ export default function App() {
       if (res.ok) {
         const updated = await res.json();
         setData(updated);
-        setUploadStatus('CSV loaded! Charts and ML models updated.');
+        setUploadStatus('CSV loaded! Deposits, expenses & ML models updated.');
       } else {
         const err = await res.json();
         setUploadStatus(`Error: ${err.detail}`);
@@ -179,7 +222,7 @@ export default function App() {
     datasets: [
       {
         data: categoryValues,
-        backgroundColor: ['#4f46e5', '#ec4899', '#0ea5e9', '#f59e0b', '#10b981', '#8b5cf6'],
+        backgroundColor: ['#4f46e5', '#ec4899', '#0ea5e9', '#f59e0b', '#10b981', '#8b5cf6', '#64748b'],
         borderWidth: 0,
         cutout: '68%',
       },
@@ -275,10 +318,20 @@ export default function App() {
           <h1 className="text-xl font-bold text-slate-800">Financial Tracking Dashboard</h1>
           <div className="flex items-center gap-5">
             {data && (
-              <span className="text-sm text-slate-500">
-                EOM Forecast:{' '}
-                <strong className="text-indigo-600">${data.eom_forecast.toLocaleString()}</strong>
-              </span>
+              <>
+                <span className="text-sm text-slate-500">
+                  Balance:{' '}
+                  <strong className="text-slate-800">
+                    ${data.current_balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </strong>
+                </span>
+                <span className="text-sm text-slate-500">
+                  EOM Forecast:{' '}
+                  <strong className="text-indigo-600">
+                    ${data.eom_forecast.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </strong>
+                </span>
+              </>
             )}
             <div className="relative cursor-pointer" onClick={() => setActiveTab('transactions')}>
               <Bell className="text-slate-500" size={22} />
@@ -293,6 +346,44 @@ export default function App() {
           {/* DASHBOARD TAB */}
           {activeTab === 'dashboard' && (
             <div className="max-w-7xl mx-auto space-y-6">
+              {/* Starting Balance Editor Bar */}
+              <div className="bg-white px-6 py-4 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-6 text-sm">
+                  <div>
+                    <span className="text-slate-500">Total Deposits: </span>
+                    <strong className="text-emerald-600">
+                      +${(data?.total_deposits ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Total Spent: </span>
+                    <strong className="text-rose-600">
+                      -${currentSpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-500 font-medium">Starting Bank Balance:</span>
+                  <div className="flex items-center border border-slate-200 rounded-lg px-2.5 py-1.5 bg-slate-50">
+                    <span className="text-slate-400 mr-1">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={balanceInput}
+                      onChange={(e) => setBalanceInput(e.target.value)}
+                      className="w-28 bg-transparent text-sm font-semibold text-slate-800 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={handleUpdateBalance}
+                    className="px-4 py-1.5 bg-indigo-600 text-white font-semibold text-sm rounded-lg hover:bg-indigo-700"
+                  >
+                    Update
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                   <div className="h-72">
@@ -399,8 +490,8 @@ export default function App() {
                   onSubmit={handleAddTransaction}
                   className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4"
                 >
-                  <h2 className="text-lg font-bold text-slate-800">Add Transaction</h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <h2 className="text-lg font-bold text-slate-800">Add Transaction or Deposit</h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
                     <input
                       type="date"
                       value={txForm.date}
@@ -408,6 +499,14 @@ export default function App() {
                       className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
                       required
                     />
+                    <select
+                      value={txForm.type}
+                      onChange={(e) => setTxForm({ ...txForm, type: e.target.value })}
+                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium"
+                    >
+                      <option value="Expense">Expense (-)</option>
+                      <option value="Deposit">Deposit (+)</option>
+                    </select>
                     <input
                       type="text"
                       placeholder="Description"
@@ -419,7 +518,8 @@ export default function App() {
                     <select
                       value={txForm.category}
                       onChange={(e) => setTxForm({ ...txForm, category: e.target.value })}
-                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                      disabled={txForm.type === 'Deposit'}
+                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:bg-slate-100"
                     >
                       <option>Housing</option>
                       <option>Food</option>
@@ -427,6 +527,7 @@ export default function App() {
                       <option>Transportation</option>
                       <option>Entertainment</option>
                       <option>Shopping</option>
+                      <option>Transfers</option>
                     </select>
                     <input
                       type="number"
@@ -442,7 +543,7 @@ export default function App() {
                     type="submit"
                     className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700"
                   >
-                    <Plus size={16} /> Add Transaction
+                    <Plus size={16} /> Add Entry
                   </button>
                 </form>
 
@@ -450,7 +551,7 @@ export default function App() {
                   <div>
                     <h2 className="text-lg font-bold text-slate-800 mb-1">Upload Bank CSV</h2>
                     <p className="text-xs text-slate-500 mb-4">
-                      Columns required: <code>date, description, category, amount</code>
+                      Supports Chase CSVs (imports both deposits & expenses) or standard CSVs.
                     </p>
                   </div>
                   <label className="flex items-center justify-center gap-2 w-full py-2.5 px-4 border-2 border-dashed border-indigo-200 rounded-xl text-indigo-600 font-semibold text-sm cursor-pointer hover:bg-indigo-50">
@@ -473,6 +574,7 @@ export default function App() {
                       <th className="py-3.5 px-6 font-semibold">Category</th>
                       <th className="py-3.5 px-6 font-semibold">Amount</th>
                       <th className="py-3.5 px-6 font-semibold">AI Risk Check</th>
+                      <th className="py-3.5 px-6 font-semibold text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -485,11 +587,19 @@ export default function App() {
                             {tx.category}
                           </span>
                         </td>
-                        <td className="py-3.5 px-6 font-semibold text-slate-800">
-                          ${tx.amount.toFixed(2)}
+                        <td
+                          className={`py-3.5 px-6 font-semibold ${
+                            tx.type === 'Deposit' ? 'text-emerald-600' : 'text-slate-800'
+                          }`}
+                        >
+                          {tx.type === 'Deposit' ? '+' : '-'}${tx.amount.toFixed(2)}
                         </td>
                         <td className="py-3.5 px-6">
-                          {tx.risk_flag ? (
+                          {tx.type === 'Deposit' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-full text-xs font-semibold">
+                              <ArrowUpCircle size={13} /> Deposit
+                            </span>
+                          ) : tx.risk_flag ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-50 text-rose-600 rounded-full text-xs font-semibold">
                               <AlertTriangle size={13} /> Overspending Risk
                             </span>
@@ -498,6 +608,15 @@ export default function App() {
                               <CheckCircle2 size={13} /> Normal
                             </span>
                           )}
+                        </td>
+                        <td className="py-3.5 px-6 text-right">
+                          <button
+                            onClick={() => handleDeleteTransaction(tx.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            title="Delete transaction"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -569,6 +688,7 @@ export default function App() {
                       <th className="py-3.5 px-6 font-semibold">Name</th>
                       <th className="py-3.5 px-6 font-semibold">Type</th>
                       <th className="py-3.5 px-6 font-semibold">Amount</th>
+                      <th className="py-3.5 px-6 font-semibold text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -588,6 +708,15 @@ export default function App() {
                         </td>
                         <td className="py-3.5 px-6 font-semibold text-slate-800">
                           ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3.5 px-6 text-right">
+                          <button
+                            onClick={() => handleDeleteIncome(item.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            title="Delete entry"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </td>
                       </tr>
                     ))}

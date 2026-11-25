@@ -16,15 +16,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Initial Starter Data ---
+# --- State ---
+starting_balance = 8700.00
+
 transactions = [
-    {"id": 1, "date": "2026-10-01", "description": "Monthly Rent", "category": "Housing", "amount": 1400.00},
-    {"id": 2, "date": "2026-10-03", "description": "Grocery Run", "category": "Food", "amount": 185.50},
-    {"id": 3, "date": "2026-10-07", "description": "Electric & Wi-Fi", "category": "Utilities", "amount": 180.00},
-    {"id": 4, "date": "2026-10-12", "description": "Concert Tickets", "category": "Entertainment", "amount": 450.00},
-    {"id": 5, "date": "2026-10-16", "description": "Gas & Transit", "category": "Transportation", "amount": 120.00},
-    {"id": 6, "date": "2026-10-20", "description": "Electronics Store", "category": "Shopping", "amount": 466.60},
-    {"id": 7, "date": "2026-10-24", "description": "Dining Out", "category": "Food", "amount": 294.50},
+    {"id": 1, "date": "2026-10-01", "description": "Monthly Rent", "category": "Housing", "amount": 1400.00, "type": "Expense"},
+    {"id": 2, "date": "2026-10-03", "description": "Grocery Run", "category": "Food", "amount": 185.50, "type": "Expense"},
+    {"id": 3, "date": "2026-10-07", "description": "Electric & Wi-Fi", "category": "Utilities", "amount": 180.00, "type": "Expense"},
+    {"id": 4, "date": "2026-10-12", "description": "Concert Tickets", "category": "Entertainment", "amount": 450.00, "type": "Expense"},
+    {"id": 5, "date": "2026-10-15", "description": "Bi-Weekly Paycheck", "category": "Income", "amount": 2100.00, "type": "Deposit"},
+    {"id": 6, "date": "2026-10-16", "description": "Gas & Transit", "category": "Transportation", "amount": 120.00, "type": "Expense"},
+    {"id": 7, "date": "2026-10-20", "description": "Electronics Store", "category": "Shopping", "amount": 466.60, "type": "Expense"},
+    {"id": 8, "date": "2026-10-24", "description": "Dining Out", "category": "Food", "amount": 294.50, "type": "Expense"},
 ]
 
 income_assets = [
@@ -33,8 +36,6 @@ income_assets = [
     {"id": 3, "name": "High-Yield Savings", "type": "Asset", "amount": 5600.00},
     {"id": 4, "name": "Roth IRA / Index Funds", "type": "Asset", "amount": 3400.00},
 ]
-
-STARTING_BALANCE = 8700.00
 
 # --- Train Logistic Regression Model for Overspending Risk ---
 X_train = np.array([[15], [45], [80], [120], [250], [400], [600], [1200]])
@@ -48,12 +49,17 @@ class TransactionCreate(BaseModel):
     description: str
     category: str
     amount: float
+    type: str = "Expense"  # "Expense" or "Deposit"
 
 
 class IncomeAssetCreate(BaseModel):
     name: str
     type: str  # "Income" or "Asset"
     amount: float
+
+
+class BalanceUpdate(BaseModel):
+    balance: float
 
 
 def auto_categorize(description: str) -> str:
@@ -73,26 +79,38 @@ def auto_categorize(description: str) -> str:
     return "Shopping"
 
 
+def parse_sort_date(date_str: str):
+    try:
+        return pd.to_datetime(date_str)
+    except Exception:
+        return pd.Timestamp.min
+
+
 def build_dashboard_state():
-    # Flag each transaction using Logistic Regression
     enriched_tx = []
     anomalies = 0
-    running_balance = STARTING_BALANCE
+    running_balance = starting_balance
     balance_labels = ["Start"]
-    balance_values = [STARTING_BALANCE]
+    balance_values = [round(starting_balance, 2)]
 
-    sorted_tx = sorted(transactions, key=lambda x: x["date"])
+    sorted_tx = sorted(transactions, key=lambda x: parse_sort_date(x["date"]))
 
     for tx in sorted_tx:
-        is_risk = int(log_model.predict(np.array([[tx["amount"]]]))[0]) == 1
-        if is_risk:
-            anomalies += 1
-        running_balance -= tx["amount"]
+        tx_type = tx.get("type", "Expense")
+        if tx_type == "Deposit":
+            is_risk = False
+            running_balance += tx["amount"]
+        else:
+            is_risk = int(log_model.predict(np.array([[tx["amount"]]]))[0]) == 1
+            if is_risk:
+                anomalies += 1
+            running_balance -= tx["amount"]
+
         balance_labels.append(tx["date"])
         balance_values.append(round(running_balance, 2))
-        enriched_tx.append({**tx, "risk_flag": is_risk})
+        enriched_tx.append({**tx, "type": tx_type, "risk_flag": is_risk})
 
-    # Linear Regression Forecast
+    # Linear Regression Forecast (accounts for both deposits & expenses)
     if len(balance_values) >= 2:
         days = np.arange(len(balance_values)).reshape(-1, 1)
         y_vals = np.array(balance_values)
@@ -104,20 +122,29 @@ def build_dashboard_state():
         trend_line = balance_values
         eom_forecast = round(running_balance, 2)
 
-    # Category Breakdown
+    # Category Breakdown (Expenses only)
     category_totals = {}
+    total_spent = 0.0
+    total_deposits = 0.0
     for tx in transactions:
-        cat = tx["category"]
-        category_totals[cat] = round(category_totals.get(cat, 0) + tx["amount"], 2)
+        if tx.get("type", "Expense") == "Deposit":
+            total_deposits += tx["amount"]
+        else:
+            cat = tx["category"]
+            category_totals[cat] = round(category_totals.get(cat, 0) + tx["amount"], 2)
+            total_spent += tx["amount"]
 
-    total_spent = round(sum(tx["amount"] for tx in transactions), 2)
+    total_spent = round(total_spent, 2)
+    total_deposits = round(total_deposits, 2)
     highest_cat = max(category_totals.items(), key=lambda x: x[1]) if category_totals else ("None", 0)
 
     return {
+        "starting_balance": round(starting_balance, 2),
         "current_balance": round(running_balance, 2),
         "eom_forecast": eom_forecast,
         "anomalies_detected": anomalies,
         "total_spent": total_spent,
+        "total_deposits": total_deposits,
         "highest_category": {"name": highest_cat[0], "amount": highest_cat[1]},
         "balance_history": {
             "labels": balance_labels,
@@ -140,6 +167,13 @@ def get_dashboard_summary():
     return build_dashboard_state()
 
 
+@app.post("/api/balance")
+def update_balance(payload: BalanceUpdate):
+    global starting_balance
+    starting_balance = float(payload.balance)
+    return build_dashboard_state()
+
+
 @app.post("/api/transactions")
 def add_transaction(tx: TransactionCreate):
     new_id = max((t["id"] for t in transactions), default=0) + 1
@@ -147,9 +181,17 @@ def add_transaction(tx: TransactionCreate):
         "id": new_id,
         "date": tx.date,
         "description": tx.description,
-        "category": tx.category,
-        "amount": float(tx.amount),
+        "category": "Income" if tx.type == "Deposit" else tx.category,
+        "amount": abs(float(tx.amount)),
+        "type": tx.type,
     })
+    return build_dashboard_state()
+
+
+@app.delete("/api/transactions/{tx_id}")
+def delete_transaction(tx_id: int):
+    global transactions
+    transactions = [t for t in transactions if t["id"] != tx_id]
     return build_dashboard_state()
 
 
@@ -160,8 +202,15 @@ def add_income_asset(item: IncomeAssetCreate):
         "id": new_id,
         "name": item.name,
         "type": item.type,
-        "amount": float(item.amount),
+        "amount": abs(float(item.amount)),
     })
+    return build_dashboard_state()
+
+
+@app.delete("/api/income/{item_id}")
+def delete_income_asset(item_id: int):
+    global income_assets
+    income_assets = [i for i in income_assets if i["id"] != item_id]
     return build_dashboard_state()
 
 
@@ -172,40 +221,42 @@ async def upload_csv(file: UploadFile = File(...)):
 
     contents = await file.read()
     try:
-        # index_col=False prevents Chase's trailing commas from shifting columns
         df = pd.read_csv(io.BytesIO(contents), index_col=False)
         df.columns = [c.strip().lower() for c in df.columns]
 
-        # Format 1: Chase Bank CSV
+        # Format 1: Chase Bank CSV (imports BOTH deposits & expenses)
         if {"posting date", "description", "amount"}.issubset(set(df.columns)):
             transactions.clear()
             tx_id = 1
             for _, row in df.iterrows():
                 amt = float(row["amount"])
-                # Only include expenses (negative amounts in Chase CSVs)
-                if amt < 0:
-                    desc = str(row["description"]).strip()
-                    transactions.append({
-                        "id": tx_id,
-                        "date": str(row["posting date"]).strip(),
-                        "description": desc,
-                        "category": auto_categorize(desc),
-                        "amount": round(abs(amt), 2),
-                    })
-                    tx_id += 1
+                desc = str(row["description"]).strip()
+                is_deposit = amt > 0
+                transactions.append({
+                    "id": tx_id,
+                    "date": str(row["posting date"]).strip(),
+                    "description": desc,
+                    "category": "Income" if is_deposit else auto_categorize(desc),
+                    "amount": round(abs(amt), 2),
+                    "type": "Deposit" if is_deposit else "Expense",
+                })
+                tx_id += 1
             return build_dashboard_state()
 
-        # Format 2: Standard CSV (date, description, category, amount)
+        # Format 2: Standard CSV (date, description, category, amount, optional type)
         required = {"date", "description", "category", "amount"}
         if required.issubset(set(df.columns)):
             transactions.clear()
             for idx, row in df.iterrows():
+                raw_amt = float(row["amount"])
+                tx_type = str(row["type"]).strip() if "type" in df.columns else ("Deposit" if raw_amt > 0 and str(row["category"]).lower() == "income" else "Expense")
                 transactions.append({
                     "id": int(idx) + 1,
                     "date": str(row["date"]),
                     "description": str(row["description"]),
                     "category": str(row["category"]),
-                    "amount": abs(float(row["amount"])),
+                    "amount": round(abs(raw_amt), 2),
+                    "type": tx_type,
                 })
             return build_dashboard_state()
 
