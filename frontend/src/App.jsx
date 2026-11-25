@@ -39,8 +39,7 @@ ChartJS.register(
   Legend
 );
 
-// REPLACE THIS WITH YOUR ACTUAL RENDER URL
-const API_URL = 'https://YOUR-RENDER-URL.onrender.com';
+const API_URL = 'https://financial-dashboard-i5z3.onrender.com';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
