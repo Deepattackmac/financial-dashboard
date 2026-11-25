@@ -56,6 +56,23 @@ class IncomeAssetCreate(BaseModel):
     amount: float
 
 
+def auto_categorize(description: str) -> str:
+    desc = description.lower()
+    if any(k in desc for k in ["uber eats", "doordash", "grubhub", "pizza", "caesars", "shawarma", "mcdonald", "starbucks", "chipotle", "grocery", "walmart", "jewel", "aldi", "vend", "restaurant", "cafe", "burger"]):
+        return "Food"
+    if any(k in desc for k in ["comcast", "xfinity", "electric", "water", "gas", "internet", "att", "verizon", "t-mobile"]):
+        return "Utilities"
+    if any(k in desc for k in ["rent", "mortgage", "apartment", "lease"]):
+        return "Housing"
+    if any(k in desc for k in ["uber ", "lyft", "shell", "bp ", "exxon", "chevron", "wally", "transit", "parking", "toll"]):
+        return "Transportation"
+    if any(k in desc for k in ["spotify", "netflix", "hulu", "riot games", "steam", "playstation", "xbox", "amc", "ticket"]):
+        return "Entertainment"
+    if any(k in desc for k in ["venmo", "zelle", "paypal", "cash app"]):
+        return "Transfers"
+    return "Shopping"
+
+
 def build_dashboard_state():
     # Flag each transaction using Logistic Regression
     enriched_tx = []
@@ -155,27 +172,47 @@ async def upload_csv(file: UploadFile = File(...)):
 
     contents = await file.read()
     try:
-        df = pd.read_csv(io.BytesIO(contents))
+        # index_col=False prevents Chase's trailing commas from shifting columns
+        df = pd.read_csv(io.BytesIO(contents), index_col=False)
         df.columns = [c.strip().lower() for c in df.columns]
 
+        # Format 1: Chase Bank CSV
+        if {"posting date", "description", "amount"}.issubset(set(df.columns)):
+            transactions.clear()
+            tx_id = 1
+            for _, row in df.iterrows():
+                amt = float(row["amount"])
+                # Only include expenses (negative amounts in Chase CSVs)
+                if amt < 0:
+                    desc = str(row["description"]).strip()
+                    transactions.append({
+                        "id": tx_id,
+                        "date": str(row["posting date"]).strip(),
+                        "description": desc,
+                        "category": auto_categorize(desc),
+                        "amount": round(abs(amt), 2),
+                    })
+                    tx_id += 1
+            return build_dashboard_state()
+
+        # Format 2: Standard CSV (date, description, category, amount)
         required = {"date", "description", "category", "amount"}
-        if not required.issubset(set(df.columns)):
-            raise HTTPException(
-                status_code=400,
-                detail="CSV must contain columns: date, description, category, amount",
-            )
+        if required.issubset(set(df.columns)):
+            transactions.clear()
+            for idx, row in df.iterrows():
+                transactions.append({
+                    "id": int(idx) + 1,
+                    "date": str(row["date"]),
+                    "description": str(row["description"]),
+                    "category": str(row["category"]),
+                    "amount": abs(float(row["amount"])),
+                })
+            return build_dashboard_state()
 
-        transactions.clear()
-        for idx, row in df.iterrows():
-            transactions.append({
-                "id": int(idx) + 1,
-                "date": str(row["date"]),
-                "description": str(row["description"]),
-                "category": str(row["category"]),
-                "amount": abs(float(row["amount"])),
-            })
-
-        return build_dashboard_state()
+        raise HTTPException(
+            status_code=400,
+            detail="CSV must be a Chase export or contain: date, description, category, amount",
+        )
     except HTTPException:
         raise
     except Exception as e:
